@@ -21,3 +21,25 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.*
+!.env.example
+
+# Binaries, Archives & Large Blobs
+cloudflared.exe
+*.exe
+*.zip
+*.tar.gz
+*.backup_*
+*.db.final_backup_*
+*.db.backup_*
+*.pyc
+__pycache__/
+
+# Temporary & Local files
+tunnel_url.txt
+backup_pre_migration/
+certishield_clean/
+certitrust/
+certitrust_data/
+certitrust_database/
+CertiShield_VSCode/

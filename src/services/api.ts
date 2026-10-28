@@ -1,254 +1,285 @@
-/**
- * Eco-Link Full-Stack REST API Client
- * ===================================
- * Connects frontend state to Python Flask backend & SQLite database (:5000)
- * with graceful offline-first fallback.
- */
-
-import type {
-  MaterialLot,
-  Price,
-  Recycler,
-  Offer,
-  HandoverRecord,
-  Earnings,
-  MaterialCategory,
-  CollectorProfile,
-} from '@/types';
 import {
-  INITIAL_SEED_LOTS,
-  INITIAL_SEED_OFFERS,
-  INITIAL_SEED_HANDOVERS,
-  DEFAULT_PRICES,
-  AUTHORIZED_RECYCLERS,
-  demoCollectorProfile,
-} from '@/data/mockData';
+  User,
+  Course,
+  Semester,
+  Subject,
+  FacultyAssignment,
+  Student,
+  MarkRecord,
+  AttendanceRecord,
+  AttendanceSummary,
+  StudentAnalytics,
+  AtRiskStudent,
+  Intervention,
+  AtRiskRule,
+  GradingScaleItem,
+  CollegeOverview
+} from '../types';
 
-const BASE_URL = 'http://localhost:5000/api';
+const API_BASE = '/api';
 
-async function fetchJson<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
+function getAuthToken(): string | null {
+  return localStorage.getItem('spams_token');
+}
+
+export function setAuthToken(token: string) {
+  localStorage.setItem('spams_token', token);
+}
+
+export function removeAuthToken() {
+  localStorage.removeItem('spams_token');
+}
+
+async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
+    headers,
   });
-  if (!res.ok) {
-    throw new Error(`API Error ${res.status}: ${res.statusText}`);
+
+  if (!response.ok) {
+    let errorMsg = `Error ${response.status}: ${response.statusText}`;
+    try {
+      const errJson = await response.json();
+      errorMsg = errJson.error || errJson.message || errorMsg;
+    } catch {
+      // ignore
+    }
+    throw new Error(errorMsg);
   }
-  return res.json();
+
+  // Handle empty responses
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    return response.json();
+  }
+  return response.text() as unknown as T;
 }
 
-// -----------------------------------------------------------------------------
-// Lots API
-// -----------------------------------------------------------------------------
-
-export async function fetchLots(status?: string): Promise<MaterialLot[]> {
-  try {
-    const url = status ? `/lots?status=${encodeURIComponent(status)}` : '/lots';
-    return await fetchJson<MaterialLot[]>(url);
-  } catch (error) {
-    console.warn('Backend unavailable, using cached lots:', error);
-    return INITIAL_SEED_LOTS;
-  }
-}
-
-export async function fetchLot(lotId: string): Promise<MaterialLot | null> {
-  try {
-    return await fetchJson<MaterialLot>(`/lots/${encodeURIComponent(lotId)}`);
-  } catch (error) {
-    console.warn(`Backend unavailable for lot ${lotId}:`, error);
-    return INITIAL_SEED_LOTS.find((l) => l.lotId === lotId) || null;
-  }
-}
-
-export async function createLotApi(lotData: Partial<MaterialLot>): Promise<MaterialLot> {
-  try {
-    return await fetchJson<MaterialLot>('/lots', {
+export const api = {
+  // Auth
+  async login(username: string, password: string): Promise<{ token: string; user: User }> {
+    return request('/auth/login', {
       method: 'POST',
-      body: JSON.stringify(lotData),
+      body: JSON.stringify({ username, password }),
     });
-  } catch (error) {
-    console.warn('Backend unavailable, creating local lot:', error);
-    const newLot: MaterialLot = {
-      lotId: `EW-${String(Math.floor(100 + Math.random() * 900))}`,
-      material: lotData.material || 'PCB',
-      weightKg: lotData.weightKg || 5,
-      photoUrl: lotData.photoUrl || '',
-      location: lotData.location || 'Pune',
-      createdAt: new Date().toISOString(),
-      status: 'Created',
-      referencePricePerKg: lotData.referencePricePerKg || 320,
-      estimatedValue: lotData.estimatedValue || 1600,
-      offeredPricePerKg: lotData.offeredPricePerKg,
-      totalOfferValue: lotData.totalOfferValue,
-      matchedRecyclerId: lotData.matchedRecyclerId || 'REC-001',
-      pickupAvailable: true,
-      isOfflineDraft: true,
-    };
-    return newLot;
-  }
-}
+  },
 
-// -----------------------------------------------------------------------------
-// Recyclers & Profiles API
-// -----------------------------------------------------------------------------
+  async getMe(): Promise<{ user: User }> {
+    return request('/auth/me');
+  },
 
-export async function fetchRecyclers(): Promise<Recycler[]> {
-  try {
-    return await fetchJson<Recycler[]>('/recyclers');
-  } catch (error) {
-    console.warn('Backend unavailable, using default recyclers:', error);
-    return AUTHORIZED_RECYCLERS;
-  }
-}
+  // Courses & Semesters
+  async getCourses(): Promise<Course[]> {
+    return request('/courses');
+  },
 
-export async function updateRecyclerApi(id: string, updates: Partial<Recycler>): Promise<Recycler> {
-  try {
-    return await fetchJson<Recycler>(`/recyclers/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  } catch (error) {
-    console.warn(`Backend unavailable, updating local recycler ${id}:`, error);
-    const found = AUTHORIZED_RECYCLERS.find((r) => r.id === id) || AUTHORIZED_RECYCLERS[0];
-    return { ...found, ...updates };
-  }
-}
-
-export async function fetchCollectorProfile(): Promise<CollectorProfile> {
-  try {
-    return await fetchJson<CollectorProfile>('/profiles/collector');
-  } catch (error) {
-    console.warn('Backend unavailable, using default collector profile:', error);
-    return demoCollectorProfile;
-  }
-}
-
-export async function updateCollectorProfileApi(
-  updates: Partial<CollectorProfile>
-): Promise<CollectorProfile> {
-  try {
-    return await fetchJson<CollectorProfile>('/profiles/collector', {
-      method: 'PUT',
-      body: JSON.stringify(updates),
-    });
-  } catch (error) {
-    console.warn('Backend unavailable, updating local collector profile:', error);
-    return { ...demoCollectorProfile, ...updates } as CollectorProfile;
-  }
-}
-
-export async function createCollectorProfileApi(
-  data: Partial<CollectorProfile> & { resetLotsForNewUser?: boolean }
-): Promise<CollectorProfile> {
-  try {
-    return await fetchJson<CollectorProfile>('/profiles/collector', {
+  async createCourse(data: Partial<Course>): Promise<{ message: string; course_id: number }> {
+    return request('/courses', {
       method: 'POST',
       body: JSON.stringify(data),
     });
-  } catch (error) {
-    console.warn('Backend unavailable, creating local collector account:', error);
-    return { ...demoCollectorProfile, ...data } as CollectorProfile;
-  }
-}
+  },
 
-export async function createRecyclerApi(
-  data: Partial<Recycler>
-): Promise<Recycler> {
-  try {
-    return await fetchJson<Recycler>('/recyclers', {
+  async getSemesters(courseId?: number): Promise<Semester[]> {
+    const query = courseId ? `?course_id=${courseId}` : '';
+    return request(`/semesters${query}`);
+  },
+
+  async createSemester(data: Partial<Semester>): Promise<{ message: string; semester_id: number }> {
+    return request('/semesters', {
       method: 'POST',
       body: JSON.stringify(data),
     });
-  } catch (error) {
-    console.warn('Backend unavailable, creating local recycler facility:', error);
-    return { ...AUTHORIZED_RECYCLERS[0], ...data } as Recycler;
-  }
-}
+  },
 
-// -----------------------------------------------------------------------------
-// Offers & Handover API
-// -----------------------------------------------------------------------------
+  // Subjects
+  async getSubjects(courseId?: number, semesterNumber?: number): Promise<Subject[]> {
+    const params = new URLSearchParams();
+    if (courseId) params.append('course_id', courseId.toString());
+    if (semesterNumber) params.append('semester_number', semesterNumber.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/subjects${query}`);
+  },
 
-export async function fetchOffers(): Promise<Record<string, Offer>> {
-  try {
-    return await fetchJson<Record<string, Offer>>('/offers');
-  } catch (error) {
-    console.warn('Backend unavailable, using cached offers:', error);
-    return INITIAL_SEED_OFFERS;
-  }
-}
-
-export async function sendOfferApi(offerData: any): Promise<Offer> {
-  try {
-    return await fetchJson<Offer>('/offers', {
+  async createSubject(data: Partial<Subject>): Promise<{ message: string; subject_id: number }> {
+    return request('/subjects', {
       method: 'POST',
-      body: JSON.stringify(offerData),
+      body: JSON.stringify(data),
     });
-  } catch (error) {
-    console.warn('Backend unavailable, creating local offer:', error);
-    return offerData;
-  }
-}
+  },
 
-export async function acceptOfferApi(lotId: string): Promise<any> {
-  try {
-    return await fetchJson<any>(`/offers/${encodeURIComponent(lotId)}/accept`, {
+  // Faculty & Allocations
+  async getFaculty(): Promise<any[]> {
+    return request('/faculty');
+  },
+
+  async getFacultyAssignments(facultyId?: number, semesterId?: number): Promise<FacultyAssignment[]> {
+    const params = new URLSearchParams();
+    if (facultyId) params.append('faculty_id', facultyId.toString());
+    if (semesterId) params.append('semester_id', semesterId.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/faculty/assignments${query}`);
+  },
+
+  async assignFaculty(facultyId: number, subjectId: number, semesterId: number, section = 'A'): Promise<any> {
+    return request('/faculty/assignments', {
       method: 'POST',
+      body: JSON.stringify({ faculty_id: facultyId, subject_id: subjectId, semester_id: semesterId, section }),
     });
-  } catch (error) {
-    console.warn(`Backend unavailable, accepting offer locally for ${lotId}:`, error);
-    return { lotId, status: 'Accepted' };
-  }
-}
+  },
 
-export async function declineOfferApi(lotId: string): Promise<any> {
-  try {
-    return await fetchJson<any>(`/offers/${encodeURIComponent(lotId)}/decline`, {
+  // Students
+  async getStudents(filters: { courseId?: number; semesterId?: number; subjectId?: number } = {}): Promise<Student[]> {
+    const params = new URLSearchParams();
+    if (filters.courseId) params.append('course_id', filters.courseId.toString());
+    if (filters.semesterId) params.append('semester_id', filters.semesterId.toString());
+    if (filters.subjectId) params.append('subject_id', filters.subjectId.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/students${query}`);
+  },
+
+  // Marks Management
+  async getMarks(filters: { studentId?: number; subjectId?: number; semesterId?: number } = {}): Promise<MarkRecord[]> {
+    const params = new URLSearchParams();
+    if (filters.studentId) params.append('student_id', filters.studentId.toString());
+    if (filters.subjectId) params.append('subject_id', filters.subjectId.toString());
+    if (filters.semesterId) params.append('semester_id', filters.semesterId.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/marks${query}`);
+  },
+
+  async saveMarks(records: Partial<MarkRecord>[]): Promise<{ message: string }> {
+    return request('/marks', {
       method: 'POST',
+      body: JSON.stringify(records),
     });
-  } catch (error) {
-    console.warn(`Backend unavailable, declining offer locally for ${lotId}:`, error);
-    return { lotId, status: 'declined' };
-  }
-}
+  },
 
-export async function fetchHandovers(): Promise<Record<string, HandoverRecord>> {
-  try {
-    return await fetchJson<Record<string, HandoverRecord>>('/handovers');
-  } catch (error) {
-    console.warn('Backend unavailable, using cached handovers:', error);
-    return INITIAL_SEED_HANDOVERS;
-  }
-}
+  // Attendance Management
+  async getAttendance(filters: { studentId?: number; subjectId?: number; date?: string } = {}): Promise<AttendanceRecord[]> {
+    const params = new URLSearchParams();
+    if (filters.studentId) params.append('student_id', filters.studentId.toString());
+    if (filters.subjectId) params.append('subject_id', filters.subjectId.toString());
+    if (filters.date) params.append('date', filters.date);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/attendance${query}`);
+  },
 
-export async function completeHandoverApi(lotId: string, options: any): Promise<any> {
-  try {
-    return await fetchJson<any>(`/handovers/${encodeURIComponent(lotId)}/complete`, {
+  async getAttendanceSummary(filters: { studentId?: number; subjectId?: number } = {}): Promise<AttendanceSummary[]> {
+    const params = new URLSearchParams();
+    if (filters.studentId) params.append('student_id', filters.studentId.toString());
+    if (filters.subjectId) params.append('subject_id', filters.subjectId.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/attendance/summary${query}`);
+  },
+
+  async recordBatchAttendance(data: {
+    subject_id: number;
+    date: string;
+    session_name: string;
+    records: { student_id: number; status: string; notes?: string }[];
+  }): Promise<{ message: string }> {
+    return request('/attendance/batch', {
       method: 'POST',
-      body: JSON.stringify(options),
+      body: JSON.stringify(data),
     });
-  } catch (error) {
-    console.warn(`Backend unavailable, completing handover locally for ${lotId}:`, error);
-    return { lotId, confirmed: true };
-  }
-}
+  },
 
-export async function fetchTransactions(): Promise<any[]> {
-  try {
-    return await fetchJson<any[]>('/transactions');
-  } catch (error) {
-    console.warn('Backend unavailable, using empty transactions:', error);
-    return [];
-  }
-}
+  // Performance Analytics
+  async getStudentAnalytics(studentId: number): Promise<StudentAnalytics> {
+    return request(`/analytics/student/${studentId}`);
+  },
 
-export async function resetBackendDemo(): Promise<void> {
-  try {
-    await fetchJson<any>('/reset', { method: 'POST' });
-  } catch (error) {
-    console.warn('Backend reset failed:', error);
-  }
-}
+  async getCollegeOverview(): Promise<CollegeOverview> {
+    return request('/analytics/college-overview');
+  },
+
+  async getGradingScale(): Promise<GradingScaleItem[]> {
+    return request('/analytics/grading-scale');
+  },
+
+  // At-Risk Detection
+  async getAtRiskStudents(courseId?: number, semesterId?: number): Promise<AtRiskStudent[]> {
+    const params = new URLSearchParams();
+    if (courseId) params.append('course_id', courseId.toString());
+    if (semesterId) params.append('semester_id', semesterId.toString());
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/at-risk/students${query}`);
+  },
+
+  async getAtRiskRules(): Promise<AtRiskRule[]> {
+    return request('/at-risk/rules');
+  },
+
+  async updateAtRiskRule(ruleId: number, data: Partial<AtRiskRule>): Promise<{ message: string }> {
+    return request(`/at-risk/rules/${ruleId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Faculty Interventions
+  async getInterventions(filters: { studentId?: number; facultyId?: number; status?: string } = {}): Promise<Intervention[]> {
+    const params = new URLSearchParams();
+    if (filters.studentId) params.append('student_id', filters.studentId.toString());
+    if (filters.facultyId) params.append('faculty_id', filters.facultyId.toString());
+    if (filters.status) params.append('status', filters.status);
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return request(`/interventions${query}`);
+  },
+
+  async createIntervention(data: Partial<Intervention>): Promise<{ message: string; intervention_id: number }> {
+    return request('/interventions', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  async updateIntervention(id: number, data: Partial<Intervention>): Promise<{ message: string }> {
+    return request(`/interventions/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // Reports & Exports
+  async getSemesterPerformanceReport(semesterId?: number): Promise<any[]> {
+    const query = semesterId ? `?semester_id=${semesterId}` : '';
+    return request(`/reports/semester-performance${query}`);
+  },
+
+  async getAttendanceDefaultersReport(threshold = 75, subjectId?: number): Promise<any[]> {
+    const params = new URLSearchParams();
+    params.append('threshold', threshold.toString());
+    if (subjectId) params.append('subject_id', subjectId.toString());
+    return request(`/reports/attendance-defaulters?${params.toString()}`);
+  },
+
+  async getAuditLogs(): Promise<any[]> {
+    return request('/reports/audit-logs');
+  },
+
+  downloadCSV(url: string, filename: string) {
+    const token = getAuthToken();
+    fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((res) => res.blob())
+      .then((blob) => {
+        const link = document.createElement('a');
+        link.href = window.URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+      });
+  },
+};

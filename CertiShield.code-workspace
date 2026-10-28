@@ -1,0 +1,27 @@
+{
+  "folders": [
+    {
+      "name": "CertiShield (Full Stack)",
+      "path": "."
+    },
+    {
+      "name": "Backend API Server",
+      "path": "server"
+    }
+  ],
+  "settings": {
+    "editor.tabSize": 2,
+    "editor.formatOnSave": true,
+    "files.exclude": {
+      "**/node_modules": false,
+      "**/.git": true,
+      "**/dist": false
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "dbaeumer.vscode-eslint",
+      "bradlc.vscode-tailwindcss"
+    ]
+  }
+}
